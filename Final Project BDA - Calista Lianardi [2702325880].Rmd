@@ -1,0 +1,167 @@
+---
+title: "Final Project BDA - Diabetes Analysis"
+author: "Calista Lianardi [2702325880]"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#Importing important library
+
+library(R2jags)
+library(caret)
+library(rjags)
+```
+
+**I. Data Preprocessing**
+
+I.a.Load the data
+
+```{r}
+df <- read.csv("C:/Users/liana/Downloads/diabetes.csv")
+head(df)
+```
+
+I.b. Chekcing the structure and summary of the dataset
+
+```{r}
+str(df)
+
+summary(df)
+```
+
+I.c. checking if there's any missing value
+
+```{r}
+colSums(is.na(df))
+```
+
+I.d. Checking the impossible zero traits existence, because from that attribute zero can be considered as missing value
+
+```{r}
+sapply(df[,c("Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI")], function(x) any (x == 0))
+
+```
+
+I.e. Treating the missing zero value by imputing them using median
+
+```{r}
+zerocols <- c("Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI")
+
+df[zerocols] <- lapply(df[zerocols], function(x) ifelse(x == 0, NA, x))
+
+df[zerocols] <- lapply(df[zerocols], function(x) ifelse(is.na(x), median(x, na.rm = TRUE), x))
+
+```
+
+and recheck the zero value existence to ensure our function runs well
+
+```{r}
+sapply(df[,c("Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI")], function(x) any (x == 0))
+```
+
+I.f. Normalize the continous variable between 0 and 1 for effective convergence
+
+```{r}
+normalize <- function(x) (x - min(x)) / (max(x) - min(x))
+
+contvar <- c("Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI", 
+                     "DiabetesPedigreeFunction", "Age")
+
+df[contvar] <- lapply(df[contvar], normalize)
+head(df)
+```
+
+I.g. Train Test Split using caret library with 80: 20 ratio
+
+```{r}
+set.seed(123)
+index <- createDataPartition(df$Outcome, p = 0.8, list = FALSE)
+train_data <- df[index, ]
+test_data <- df[-index, ]
+```
+
+===================================================================
+
+**II. Model Defining**
+
+II.a. Defining the Bayesian Model using Bernoulli likelihood and Gaussian priors
+
+```{r}
+model_string <- "
+model {
+  for (i in 1:N) {
+    Outcome[i] ~ dbern(p[i])
+    logit(p[i]) <- beta0 + beta1 * Glucose[i] + beta2 * BloodPressure[i] +
+                   beta3 * SkinThickness[i] + beta4 * Insulin[i] +
+                   beta5 * BMI[i] + beta6 * DiabetesPedigreeFunction[i] +
+                   beta7 * Age[i]
+    } 
+    
+    # Priors
+    beta0 ~ dnorm(0, 0.01)
+    beta1 ~ dnorm(0, 0.01)
+    beta2 ~ dnorm(0, 0.01)
+    beta3 ~ dnorm(0, 0.01)
+    beta4 ~ dnorm(0, 0.01)
+    beta5 ~ dnorm(0, 0.01)
+    beta6 ~ dnorm(0, 0.01)
+    beta7 ~ dnorm(0, 0.01)
+}
+"
+```
+
+II.b. formatting data for JAGS
+
+```{r}
+jags_data <- list(
+  Outcome = train_data$Outcome,
+  Glucose = train_data$Glucose,
+  BloodPressure = train_data$BloodPressure,
+  SkinThickness = train_data$SkinThickness,
+  Insulin = train_data$Insulin,
+  BMI = train_data$BMI,
+  DiabetesPedigreeFunction = train_data$DiabetesPedigreeFunction,
+  Age = train_data$Age,
+  N = nrow(train_data)
+)
+```
+
+II.c. Define iniitial values and parameters to monitor
+
+```{r}
+inits <- function() {
+  list(beta0 = rnorm(1), beta1 = rnorm(1), beta2 = rnorm(1), beta3 = rnorm(1),
+       beta4 = rnorm(1), beta5 = rnorm(1), beta6 = rnorm(1), beta7 = rnorm(1))
+}
+
+params <- c("beta0", "beta1", "beta2", "beta3", "beta4", "beta5", "beta6", "beta7")
+```
+
+====================================================================
+
+**III. Model Testing and Evaluation**
+
+III.a. Run the model using Rjags
+
+```{r}
+model <- jags(
+  data = jags_data,
+  inits = inits,
+  parameters.to.save = params,
+  model.file = textConnection(model_string),
+  n.chains = 3,
+  n.iter = 5000,
+  n.burnin = 1000,
+  n.thin = 10
+)
+```
+
+III.b. Posterior Summary
+
+```{r}
+print(model)
+```
+
+\`\`\`
